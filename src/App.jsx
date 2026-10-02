@@ -73,7 +73,16 @@ function App() {
     const value = Number(tpSlPopup.value);
     if (!Number.isFinite(value) || value <= 0) return;
     const field = tpSlPopup.type.toLowerCase();
-    setPositions(prev => prev.map(p => p.id === tpSlPopup.position.id ? { ...p, [field]: value } : p));
+    const position = tpSlPopup.position;
+    const linkedSide = position.side === "BUY" ? "SELL" : "BUY";
+    const linkedType = tpSlPopup.type === "TP"
+      ? (position.side === "BUY" ? "Sell Limit" : "Buy Limit")
+      : (position.side === "BUY" ? "Sell Stop" : "Buy Stop");
+    setPositions(prev => prev.map(p => p.id === position.id ? { ...p, [field]: value } : p));
+    setOpenOrders(prev => [
+      ...prev.filter(o => !(o.positionId === position.id && o.linkedType === tpSlPopup.type)),
+      { id: Date.now(), positionId: position.id, linkedType: tpSlPopup.type, symbol: position.symbol, side: linkedSide, type: linkedType, qty: position.qty, price: value }
+    ]);
     setTpSlPopup(null);
   };
   const cancelOpenOrder = id => setOpenOrders(prev => prev.filter(o => o.id !== id));
