@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   Home, BarChart3, LayoutDashboard, Plus, ArrowUpRight, ArrowDownRight,
   Settings, LifeBuoy, Moon, Sun, Star, ChevronDown, Search, Newspaper,
@@ -20,6 +20,13 @@ function App() {
   const [orderType, setOrderType] = useState("Market");
   const [qty, setQty] = useState(1);
   const [activeTab, setActiveTab] = useState("Open Positions");
+  const [watchlists, setWatchlists] = useState({ Default: symbols.map(s => s.symbol) });
+  const [activeWatchlist, setActiveWatchlist] = useState("Default");
+  const [showLists, setShowLists] = useState(false);
+  const [favorites, setFavorites] = useState(new Set());
+  const [expanded, setExpanded] = useState(null);
+  const [search, setSearch] = useState("");
+  const [bpPercent, setBpPercent] = useState(50);
 
   return (
     <div className={dark ? "app dark" : "app"}>
@@ -49,17 +56,31 @@ function App() {
       <main className="workspace">
         <section className="left-col">
           <div className="panel watchlist">
-            <div className="panel-head"><div><h3>Watchlist</h3><span>Default</span></div><button className="mini-btn">+ Add</button></div>
-            <div className="watch-tabs"><button className="selected">Default</button><button>★ Favourites</button></div>
-            <div className="search"><Search size={15}/><input placeholder="Search symbol"/></div>
-            {symbols.map(s => (
-              <button key={s.symbol} className={selected === s.symbol ? "symbol-row selected-row" : "symbol-row"} onClick={() => setSelected(s.symbol)}>
-                <span className="symbol-icon">{s.symbol.slice(0,1)}</span>
-                <span className="symbol-name"><b>{s.symbol}</b><small>{s.name}</small></span>
-                <span className="symbol-price"><b>{s.price}</b><small className={s.change.startsWith("+") ? "positive" : "negative"}>{s.change}</small></span>
-                <Star size={14} className="star"/>
-              </button>
+            <div className="panel-head"><div><h3>Watchlist</h3><span>{activeWatchlist}</span></div><button className="mini-btn" onClick={addWatchlist}>+ New</button></div>
+            <div className="watch-tabs">
+              <button className={activeWatchlist === "Default" ? "selected" : ""} onClick={() => setActiveWatchlist("Default")}>Default</button>
+              <button className={activeWatchlist === "Favourites" ? "selected" : ""} onClick={() => setActiveWatchlist("Favourites")}>★ Favourites</button>
+              <button className="watchlist-menu-btn" onClick={() => setShowLists(!showLists)}><ChevronDown size={13}/></button>
+            </div>
+            {showLists && <div className="watchlist-menu">{Object.keys(watchlists).map(name => <button key={name} onClick={() => {setActiveWatchlist(name);setShowLists(false)}}>{name}</button>)}<button onClick={addWatchlist}>＋ Create watchlist</button></div>}
+            <div className="search"><Search size={15}/><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search symbol"/></div>
+            {shownSymbols.map(s => (
+              <div key={s.symbol} className="watch-symbol-wrap">
+                <div className={selected === s.symbol ? "symbol-row selected-row" : "symbol-row"} onClick={() => selectSymbol(s.symbol)}>
+                  <span className="symbol-icon">{s.symbol.slice(0,1)}</span>
+                  <span className="symbol-name"><b>{s.symbol}</b><small>{s.name}</small></span>
+                  <span className="symbol-price"><b>{money(s.price)}</b><small className={s.change.startsWith("+") ? "positive" : "negative"}>{s.change}</small></span>
+                  <button className={"star-button " + (favorites.has(s.symbol) ? "favorite" : "")} onClick={e => {e.stopPropagation();toggleFavorite(s.symbol)}}><Star size={14} fill={favorites.has(s.symbol) ? "currentColor" : "none"}/></button>
+                  <button className="row-expand" onClick={e => {e.stopPropagation();setSelected(s.symbol);setExpanded(expanded === s.symbol ? null : s.symbol)}}><ChevronDown size={14}/></button>
+                </div>
+                {expanded === s.symbol && <div className="watch-actions">
+                  <div className="watch-action-top"><button className="watch-buy" onClick={() => {setSelected(s.symbol);setSide("BUY")}}>BUY</button><button className="watch-sell" onClick={() => {setSelected(s.symbol);setSide("SELL")}}>SELL</button><label>Qty<input type="number" min="1" value={selected === s.symbol ? qty : 1} onChange={e => {setSelected(s.symbol);setQty(e.target.value)}}/></label></div>
+                  <div className="watch-bp"><div><span>Buying Power</span><b>{bpPercent}%</b></div><input type="range" min="1" max="100" value={bpPercent} onChange={e => setBpPercent(Number(e.target.value))}/><small>{calculatedQty} units using {bpPercent}% of available buying power</small></div>
+                  <div className="watch-actions-buttons"><button onClick={() => setQty(calculatedQty)}>Use {calculatedQty} Qty</button><button onClick={() => {setQty(calculatedQty);setSide("BUY")}}>Quick Buy</button><button onClick={() => {setQty(calculatedQty);setSide("SELL")}}>Quick Sell</button></div>
+                </div>}
+              </div>
             ))}
+            <button className="add-symbol" onClick={addSymbol}>+ Add symbol</button>
           </div>
 
           <div className="panel news">
@@ -84,7 +105,7 @@ function App() {
               <button className="execute">Demo {side}</button>
             </div>
             <div className="chart">
-              <div className="price-line">25,184.25</div>
+              <div className="price-line">{money(selectedData.price)}</div>
               <div className="candles">{Array.from({length:42},(_,i)=><div key={i} className={i%3===0||i%5===0?"candle down":"candle"} style={{height:(35+(i*17)%105)+"px", marginTop:(120-(i*11)%80)+"px"}}><i/></div>)}</div>
               <div className="chart-grid"/></div>
           </div>
@@ -99,7 +120,7 @@ function App() {
         <section className="right-col">
           <div className="panel order-panel">
             <div className="panel-head"><div><h3>{selected}</h3><span>Order Window</span></div><button className="icon-btn"><X size={16}/></button></div>
-            <div className="big-quote"><strong>25,184.25</strong><span className="positive">+0.72%</span></div>
+            <div className="big-quote"><strong>{money(selectedData.price)}</strong><span className={selectedData.change.startsWith("+") ? "positive" : "negative"}>{selectedData.change}</span></div>
             <div className="buy-sell"><button className={side==="BUY"?"active-buy":""} onClick={()=>setSide("BUY")}>BUY</button><button className={side==="SELL"?"active-sell":""} onClick={()=>setSide("SELL")}>SELL</button></div>
             <label>Order Type<select value={orderType} onChange={e=>setOrderType(e.target.value)}><option>Market</option><option>Limit</option><option>Stop</option></select></label>
             <label>Quantity<input type="number" value={qty} min="1" onChange={e=>setQty(e.target.value)}/></label>
