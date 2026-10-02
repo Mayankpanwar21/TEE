@@ -6,11 +6,11 @@ import {
 } from "lucide-react";
 
 const symbols = [
-  { symbol: "NQ", name: "Nasdaq 100", price: "25,184.25", change: "+0.72%" },
-  { symbol: "ES", name: "S&P 500", price: "6,721.50", change: "+0.41%" },
-  { symbol: "YM", name: "Dow Jones", price: "46,812", change: "-0.18%" },
-  { symbol: "AAPL", name: "Apple", price: "255.90", change: "+1.12%" },
-  { symbol: "TSLA", name: "Tesla", price: "431.20", change: "-0.63%" },
+  { symbol: "NQ", name: "Nasdaq 100", price: 25184.25, change: "+0.72%" },
+  { symbol: "ES", name: "S&P 500", price: 6721.5, change: "+0.41%" },
+  { symbol: "YM", name: "Dow Jones", price: 46812, change: "-0.18%" },
+  { symbol: "AAPL", name: "Apple", price: 255.9, change: "+1.12%" },
+  { symbol: "TSLA", name: "Tesla", price: 431.2, change: "-0.63%" },
 ];
 
 function App() {
@@ -27,6 +27,20 @@ function App() {
   const [expanded, setExpanded] = useState(null);
   const [search, setSearch] = useState("");
   const [bpPercent, setBpPercent] = useState(50);
+
+  const selectedData = symbols.find(s => s.symbol === selected) || symbols[0];
+  const currentSymbols = watchlists[activeWatchlist] || [];
+  const visibleSymbols = useMemo(() => currentSymbols
+    .map(code => symbols.find(s => s.symbol === code))
+    .filter(Boolean)
+    .filter(s => (s.symbol + " " + s.name).toLowerCase().includes(search.toLowerCase())), [currentSymbols, search]);
+  const shownSymbols = activeWatchlist === "Favourites" ? visibleSymbols.filter(s => favorites.has(s.symbol)) : visibleSymbols;
+  const calculatedQty = Math.max(1, Math.floor((100000 * bpPercent / 100) / selectedData.price));
+  const money = n => Number(n).toLocaleString("en-US", {minimumFractionDigits:2, maximumFractionDigits:2});
+  const selectSymbol = symbol => { setSelected(symbol); setExpanded(symbol); };
+  const toggleFavorite = symbol => setFavorites(prev => { const next = new Set(prev); next.has(symbol) ? next.delete(symbol) : next.add(symbol); return next; });
+  const addWatchlist = () => { const name = window.prompt("Watchlist name"); if (!name?.trim() || watchlists[name.trim()]) return; setWatchlists(prev => ({...prev, [name.trim()]: []})); setActiveWatchlist(name.trim()); };
+  const addSymbol = () => { const code = window.prompt("Enter symbol: NQ, ES, YM, AAPL or TSLA"); const match = symbols.find(s => s.symbol.toLowerCase() === code?.trim().toLowerCase()); if (!match || currentSymbols.includes(match.symbol)) return; setWatchlists(prev => ({...prev, [activeWatchlist]: [...prev[activeWatchlist], match.symbol]})); };
 
   return (
     <div className={dark ? "app dark" : "app"}>
