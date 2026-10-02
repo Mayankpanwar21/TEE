@@ -27,6 +27,10 @@ function App() {
   const [expanded, setExpanded] = useState(null);
   const [search, setSearch] = useState("");
   const [bpPercent, setBpPercent] = useState(50);
+  const [positions, setPositions] = useState([]);
+  const [openOrders, setOpenOrders] = useState([]);
+  const [closedPositions, setClosedPositions] = useState([]);
+  const [tpSlPopup, setTpSlPopup] = useState(null);
 
   const selectedData = symbols.find(s => s.symbol === selected) || symbols[0];
   const currentSymbols = watchlists[activeWatchlist] || [];
@@ -36,11 +40,43 @@ function App() {
     .filter(s => (s.symbol + " " + s.name).toLowerCase().includes(search.toLowerCase())), [currentSymbols, search]);
   const shownSymbols = activeWatchlist === "Favourites" ? visibleSymbols.filter(s => favorites.has(s.symbol)) : visibleSymbols;
   const calculatedQty = Math.max(1, Math.floor((100000 * bpPercent / 100) / selectedData.price));
+  const selectedPositions = positions.filter(p => p.symbol === selected);
+  const openPnl = positions.reduce((sum, p) => sum + ((selectedData.price - p.entry) * (p.side === "BUY" ? 1 : -1) * Number(p.qty)), 0);
   const money = n => Number(n).toLocaleString("en-US", {minimumFractionDigits:2, maximumFractionDigits:2});
   const selectSymbol = symbol => { setSelected(symbol); setExpanded(symbol); };
   const toggleFavorite = symbol => setFavorites(prev => { const next = new Set(prev); next.has(symbol) ? next.delete(symbol) : next.add(symbol); return next; });
   const addWatchlist = () => { const name = window.prompt("Watchlist name"); if (!name?.trim() || watchlists[name.trim()]) return; setWatchlists(prev => ({...prev, [name.trim()]: []})); setActiveWatchlist(name.trim()); };
   const addSymbol = () => { const code = window.prompt("Enter symbol: NQ, ES, YM, AAPL or TSLA"); const match = symbols.find(s => s.symbol.toLowerCase() === code?.trim().toLowerCase()); if (!match || currentSymbols.includes(match.symbol)) return; setWatchlists(prev => ({...prev, [activeWatchlist]: [...prev[activeWatchlist], match.symbol]})); };
+  const executeDemoOrder = () => {
+    const amount = Math.max(1, Number(qty) || 1);
+    const price = Number(selectedData.price);
+    if (orderType === "Market") {
+      const position = { id: Date.now(), symbol: selected, side, qty: amount, entry: price, tp: null, sl: null };
+      setPositions(prev => [...prev, position]);
+      setActiveTab("Open Positions");
+    } else {
+      const order = { id: Date.now(), symbol: selected, side, type: orderType, qty: amount, price };
+      setOpenOrders(prev => [...prev, order]);
+      setActiveTab("Open Orders");
+    }
+  };
+  const closePosition = id => {
+    setPositions(prev => {
+      const found = prev.find(p => p.id === id);
+      if (found) setClosedPositions(closed => [...closed, { ...found, exit: Number(symbols.find(s => s.symbol === found.symbol)?.price || found.entry), closedAt: new Date().toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"}) }]);
+      return prev.filter(p => p.id !== id);
+    });
+  };
+  const openTpSlPopup = (position, type) => setTpSlPopup({ position, type, value: position[type.toLowerCase()] ?? "" });
+  const saveTpSl = () => {
+    if (!tpSlPopup) return;
+    const value = Number(tpSlPopup.value);
+    if (!Number.isFinite(value) || value <= 0) return;
+    const field = tpSlPopup.type.toLowerCase();
+    setPositions(prev => prev.map(p => p.id === tpSlPopup.position.id ? { ...p, [field]: value } : p));
+    setTpSlPopup(null);
+  };
+  const cancelOpenOrder = id => setOpenOrders(prev => prev.filter(o => o.id !== id));
 
   return (
     <div className={dark ? "app dark" : "app"}>
@@ -116,18 +152,41 @@ function App() {
               <div className="trade-toggle"><button className={side==="BUY"?"buy active": "buy"} onClick={()=>setSide("BUY")}>Buy</button><button className={side==="SELL"?"sell active":"sell"} onClick={()=>setSide("SELL")}>Sell</button></div>
               <label>Qty <input type="number" value={qty} min="1" onChange={e=>setQty(e.target.value)}/></label>
               <select value={orderType} onChange={e=>setOrderType(e.target.value)}><option>Market</option><option>Limit</option><option>Stop</option></select>
-              <button className="execute">Demo {side}</button>
+              <button className="execute" onClick={executeDemoOrder}>Demo {side}</button>
             </div>
             <div className="chart">
               <div className="price-line">{money(selectedData.price)}</div>
+              {selectedPositions.length > 0 && <div className="chart-position-strip">
+                {selectedPositions.map(p => <div className="chart-position" key={p.id}>
+                  <span className={p.side === "BUY" ? "position-side buy-text" : "position-side sell-text"}>{p.side}</span>
+                  <span>{p.qty} @ {money(p.entry)}</span>
+                  <button onClick={() => openTpSlPopup(p, "TP")}>TP{p.tp ? ` ${money(p.tp)}` : ""}</button>
+                  <button onClick={() => openTpSlPopup(p, "SL")}>SL{p.sl ? ` ${money(p.sl)}` : ""}</button>
+                  <button className="close-position" onClick={() => closePosition(p.id)}>Close</button>
+                </div>)}
+              </div>}
               <div className="candles">{Array.from({length:42},(_,i)=><div key={i} className={i%3===0||i%5===0?"candle down":"candle"} style={{height:(35+(i*17)%105)+"px", marginTop:(120-(i*11)%80)+"px"}}><i/></div>)}</div>
+              <div className="chart-markers">
+                {selectedPositions.map(p => <div className="entry-marker" key={p.id} style={{left:"46%"}}><span>{p.side} {p.qty}</span><i/></div>)}
+              </div>
               <div className="chart-grid"/></div>
           </div>
 
           <div className="panel activity">
             <div className="panel-head"><h3><Activity size={16}/> Trader Activity</h3></div>
             <div className="activity-tabs">{["Open Positions","Closed Positions","Open Orders","Executions","Today's Orders"].map(t=><button key={t} className={activeTab===t?"active":""} onClick={()=>setActiveTab(t)}>{t}</button>)}</div>
-            <div className="empty-state"><ShoppingCart size={20}/><span>No {activeTab.toLowerCase()} yet</span></div>
+            <div className="activity-content">
+              {activeTab === "Open Positions" && (positions.length ? positions.map(p => <div className="activity-row" key={p.id}>
+                <div><b className={p.side === "BUY" ? "buy-text" : "sell-text"}>{p.side}</b><strong>{p.symbol}</strong><small>{p.qty} units · Entry {money(p.entry)}</small></div>
+                <div className="activity-price"><b>{money((symbols.find(s=>s.symbol===p.symbol)?.price || p.entry))}</b><small className={((symbols.find(s=>s.symbol===p.symbol)?.price || p.entry) - p.entry) * (p.side === "BUY" ? 1 : -1) >= 0 ? "positive" : "negative"}>P&L {money(((symbols.find(s=>s.symbol===p.symbol)?.price || p.entry) - p.entry) * (p.side === "BUY" ? 1 : -1) * p.qty)}</small></div>
+                <div className="activity-actions"><button onClick={() => openTpSlPopup(p,"TP")}>TP</button><button onClick={() => openTpSlPopup(p,"SL")}>SL</button><button className="close-mini" onClick={() => closePosition(p.id)}>Close</button></div>
+              </div>) : <div className="empty-state"><ShoppingCart size={20}/><span>No open positions yet</span></div>)}
+              {activeTab === "Open Orders" && (openOrders.length ? openOrders.map(o => <div className="activity-row" key={o.id}>
+                <div><b>{o.side}</b><strong>{o.symbol}</strong><small>{o.type} · {o.qty} units</small></div><div className="activity-price"><b>{money(o.price)}</b></div><div className="activity-actions"><button onClick={() => cancelOpenOrder(o.id)}>Cancel</button></div>
+              </div>) : <div className="empty-state"><ShoppingCart size={20}/><span>No open orders yet</span></div>)}
+              {activeTab === "Closed Positions" && (closedPositions.length ? closedPositions.map(p => <div className="activity-row" key={p.id}><div><b>{p.side}</b><strong>{p.symbol}</strong><small>{p.qty} units · {p.closedAt}</small></div><div className="activity-price"><b>Entry {money(p.entry)}</b><small>Exit {money(p.exit)}</small></div></div>) : <div className="empty-state"><ShoppingCart size={20}/><span>No closed positions yet</span></div>)}
+              {(activeTab === "Executions" || activeTab === "Today's Orders") && <div className="empty-state"><ShoppingCart size={20}/><span>No {activeTab.toLowerCase()} yet</span></div>}
+            </div>
           </div>
         </section>
 
@@ -140,7 +199,7 @@ function App() {
             <label>Quantity<input type="number" value={qty} min="1" onChange={e=>setQty(e.target.value)}/></label>
             <div className="slider-row"><span>Buying Power</span><b>50%</b></div><input type="range" defaultValue="50"/>
             <div className="two-col"><label>Take Profit<input placeholder="Optional"/></label><label>Stop Loss<input placeholder="Optional"/></label></div>
-            <button className={side==="BUY"?"primary-buy":"primary-sell"}>{side} {selected}</button>
+            <button className={side==="BUY"?"primary-buy":"primary-sell"} onClick={executeDemoOrder}>{side} {selected}</button>
           </div>
 
           <div className="panel metrics">
@@ -151,6 +210,14 @@ function App() {
           </div>
         </section>
       </main>
+      {tpSlPopup && <div className="modal-backdrop" onClick={() => setTpSlPopup(null)}>
+        <div className="tp-sl-modal" onClick={e => e.stopPropagation()}>
+          <div className="modal-head"><div><b>Add {tpSlPopup.type}</b><small>{tpSlPopup.position.side} {tpSlPopup.position.qty} {tpSlPopup.position.symbol}</small></div><button className="icon-btn" onClick={() => setTpSlPopup(null)}><X size={15}/></button></div>
+          <p>{tpSlPopup.type === "TP" ? (tpSlPopup.position.side === "BUY" ? "This will create a Sell Limit for the same position and quantity." : "This will create a Buy Limit for the same position and quantity.") : (tpSlPopup.position.side === "BUY" ? "This will create a Sell Stop for the same position and quantity." : "This will create a Buy Stop for the same position and quantity.")}</p>
+          <label>Price<input autoFocus type="number" step="0.01" value={tpSlPopup.value} onChange={e => setTpSlPopup({...tpSlPopup, value:e.target.value})} placeholder={money(selectedData.price)}/></label>
+          <button className="modal-save" onClick={saveTpSl}>Save {tpSlPopup.type}</button>
+        </div>
+      </div>}
     </div>
   );
 }
